@@ -1,0 +1,7 @@
+{
+    "RequiredVersion": 32,
+    "ModTable": "BG3Bridge",
+    "FeatureFlags": [
+        "Lua"
+    ]
+}

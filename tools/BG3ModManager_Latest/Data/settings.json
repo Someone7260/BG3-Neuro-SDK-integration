@@ -1,0 +1,20 @@
+{
+  "GameDataPath": "X:/video games/Steam/steamapps/common/Baldurs Gate 3/Data",
+  "GameExecutablePath": "X:/video games/Steam/steamapps/common/Baldurs Gate 3/bin/bg3.exe",
+  "ExtenderSettings": {
+    "CreateConsole": true,
+    "EnableLuaDebugger": true,
+    "InsanityCheck": true
+  },
+  "ExtenderUpdaterSettings": {},
+  "Window": {
+    "X": -1.0,
+    "Y": -1.0,
+    "Width": -1.0,
+    "Height": -1.0
+  },
+  "Confirmations": {},
+  "LastUpdateCheck": 1785585773,
+  "LastOrder": "Current",
+  "LastImportDirectoryPath": "D:\\UNI BS\\za career\\contest projects\\BG3 project\\staging_BG3Bridge"
+}

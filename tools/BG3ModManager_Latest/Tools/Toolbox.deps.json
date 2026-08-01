@@ -1,0 +1,41 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v8.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v8.0": {
+      "Toolbox/1.0.0": {
+        "dependencies": {
+          "PowerArgs": "4.0.3"
+        },
+        "runtime": {
+          "Toolbox.dll": {}
+        }
+      },
+      "PowerArgs/4.0.3": {
+        "runtime": {
+          "lib/net6.0/PowerArgs.dll": {
+            "assemblyVersion": "4.0.3.0",
+            "fileVersion": "4.0.3.0"
+          }
+        }
+      }
+    }
+  },
+  "libraries": {
+    "Toolbox/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "PowerArgs/4.0.3": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-8baSCh4j3oF6nQYkfnERl3pk5vvidJmx6LUIdNVV2F7whx0+BuE4QUwHX+lczHUHAFKDJKABXrjrSZzAJlfWxA==",
+      "path": "powerargs/4.0.3",
+      "hashPath": "powerargs.4.0.3.nupkg.sha512"
+    }
+  }
+}

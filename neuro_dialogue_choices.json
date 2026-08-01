@@ -1,0 +1,41 @@
+{
+  "event": "DialogueChoicesRead",
+  "source": "ocr",
+  "status": "processed",
+  "timestamp_ms": 1785619977679,
+  "subtitle": "Wyll: Well met.",
+  "choices": [
+    {
+      "number": 1,
+      "text": "How does the Blade of Frontiers end up chasing a devil in the Hells? i"
+    },
+    {
+      "number": 2,
+      "text": "Tell me, Wyll: How did you come to be the Blade of Frontiers?"
+    },
+    {
+      "number": 3,
+      "text": "I've noticed your stone eye. Did you lose it in battle?"
+    },
+    {
+      "number": 4,
+      "text": "Idon't suppose you've come across an expert healer in your travels."
+    },
+    {
+      "number": 5,
+      "text": "I've got no memory of my past. Could the parasite have done that?"
+    },
+    {
+      "number": 6,
+      "text": "I've got this... bloodthirst. An urge to destroy, maim, kill."
+    },
+    {
+      "number": 7,
+      "text": "Goto camp and wait for me there"
+    },
+    {
+      "number": 8,
+      "text": "Leave."
+    }
+  ]
+}
