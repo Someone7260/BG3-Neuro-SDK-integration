@@ -41,7 +41,7 @@ An asynchronous WebSocket client implementing the Neuro Game SDK protocol:
 
 ## 🧗 Technical Challenges & Solutions
 
-Full history in `dev_logs/`. The two hardest problems, and what actually solved them:
+The two hardest problems, and what actually solved them:
 
 ### Deploying a Script Extender Mod Under Patch 7
 Patch 7 introduced a stricter in-game Mod Manager that validates loaded mods against `modsettings.lsx`, which created a real deployment obstacle specific to BG3SE-based mods:
