@@ -1,8 +1,22 @@
+"""
+Mock Randy (Automated Neuro SDK Stand-in)
+
+This script is a Python port/extension of VedalAI's official 'Randy' SDK testing server.
+While the official Randy requires manual HTTP POST requests to trigger actions, this 
+mock server automatically reads the `actions/force` command and randomly selects a valid 
+registered action after a 3-second delay. It is used to fully automate the Phase 5 
+closed-loop validation testing without requiring manual intervention.
+"""
+
 import asyncio
 import json
 import websockets
 
+import random
+import uuid
+
 async def mock_randy(websocket):
+    registered_actions = []
     print(f"[MockRandy] Client connected from {websocket.remote_address}")
     try:
         async for message in websocket:
@@ -16,7 +30,16 @@ async def mock_randy(websocket):
                 actions = data.get("actions", [])
                 print(f"[MockRandy] Registered {len(actions)} actions.")
                 for a in actions:
-                    print(f"  - {a.get('name')}")
+                    name = a.get('name')
+                    print(f"  - {name}")
+                    registered_actions.append(name)
+                    
+            elif cmd == "actions/unregister":
+                unreg_names = data.get("action_names", [])
+                print(f"[MockRandy] Unregistered {len(unreg_names)} actions.")
+                for name in unreg_names:
+                    if name in registered_actions:
+                        registered_actions.remove(name)
                     
             elif cmd == "context":
                 print(f"\n[MockRandy] === CONTEXT RECEIVED ===")
@@ -26,14 +49,20 @@ async def mock_randy(websocket):
                 # Mock Neuro making a decision after 3 seconds
                 print("[MockRandy] Neuro is thinking...")
                 await asyncio.sleep(3)
-                print("[MockRandy] Neuro decides to pick choice 1!")
                 
-                await websocket.send(json.dumps({
-                    "command": "action",
-                    "id": "mock_id_123",
-                    "name": "select_dialogue",
-                    "data": json.dumps({"choice_number": 1})
-                }))
+                if registered_actions:
+                    chosen_action = random.choice(registered_actions)
+                    print(f"[MockRandy] Neuro decides to pick: {chosen_action}!")
+                    
+                    await websocket.send(json.dumps({
+                        "command": "action",
+                        "id": str(uuid.uuid4()),
+                        "name": chosen_action,
+                        "data": "{}"
+                    }))
+                else:
+                    print("[MockRandy] No actions registered to pick from!")
+                
                 
             elif cmd == "action/result":
                 print(f"[MockRandy] Action result: {data.get('success')} - {data.get('message')}")

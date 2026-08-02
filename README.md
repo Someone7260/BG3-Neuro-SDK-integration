@@ -1,244 +1,83 @@
-# BG3Bridge — BG3SE External Bridge MVP
+# BG3-Neuro-SDK-Integration
 
-> **Scope:** Persistent State tracking (`DialogStarted`, `DialogActorJoined`, `EnteredCombat`, `LeftCombat`) → JSON file → Python watcher.
-> This is Phase 2 for the Neuro AI co-host. No WebSockets yet, but features rolling event logs and character-name mapping.
+This repository contains a working end-to-end prototype telemetry and actuation pipeline bridging Baldur's Gate 3 with VedalAI's Neuro SDK. It allows an external AI client to read in-game dialogue state, parse dialogue choices from the screen, and inject keystrokes to control the game — demonstrated with a full successful loop against the SDK's reference test client (Randy).
 
----
-
-## Architecture
-
-```
-BG3 (running) ──► BG3SE Lua sandbox ──► Ext.IO.SaveFile ──► neuro_state.json
-                                                                      │
-                                              Python watcher ─────────┘
-                                              (polls / inotify)
-                                                      │
-                                              stdout: parsed JSON + bridge timestamp
-```
+Baldur's Gate 3 has no first-party support for external control or telemetry. Building a working bridge required working through several real, non-obvious engine and modding-ecosystem obstacles, documented honestly below rather than glossed over.
 
 ---
 
-## Prerequisites
+## 🏗️ Architecture Pipeline
 
-| Tool | Where to get it |
-|---|---|
-| **BG3 Script Extender v32** | https://github.com/Norbyte/bg3se/releases |
-| **Python 3.8+** | https://www.python.org |
-| `watchfiles` (optional, recommended) | `pip install watchfiles` |
+The system is split into four components:
 
----
+### 1. The Engine Hook (Lua Sandbox Mod)
+Uses the BG3 Script Extender (BG3SE), a third-party tool, to hook directly into the game's Osiris event system (`DialogStarted`, `DialogActorJoined`, `EnteredCombat`, `DialogRollResult`, and others). BG3SE's Lua sandbox does not have a working networking library, so captured state is serialized and written to a local file (`bg3_raw_events.jsonl`) via atomic writes, rather than sent over a socket directly from Lua.
 
-## Step 1 — Install BG3 Script Extender
+### 2. The Supervisor & Security Scrubber (`bg3_supervisor.py`)
+A real-time Python service tails the Lua output file, with several independent responsibilities:
+- Scrubs hardware paths, Windows usernames, and Steam IDs before any data leaves the local machine.
+- Filters engine noise (e.g. inanimate objects like torches or chests incorrectly triggering combat-adjacent events) via an `Osi.IsCharacter` check.
+- Deduplicates and sequence-checks events to catch dropped or repeated writes.
+- Supervises the watcher process itself, correctly detecting force-killed processes (which can falsely report a clean exit code) and restarting them, with a crash-loop cap.
 
-1. Download the **latest release** (v32, `bg3_se_*.zip`) from the [releases page](https://github.com/Norbyte/bg3se/releases).
-2. Extract and copy **`DWrite.dll`** into:
-   ```
-   <Steam>\steamapps\common\Baldurs Gate 3\bin\
-   ```
-   The default Steam path is usually:
-   ```
-   C:\Program Files (x86)\Steam\steamapps\common\Baldurs Gate 3\bin\
-   ```
-3. Create (or edit) **`ScriptExtenderSettings.json`** in the same `bin\` folder:
-   ```json
-   {
-       "CreateConsole": true,
-       "LogLevel": "Warning"
-   }
-   ```
-   `CreateConsole: true` opens the SE debug console window when the game starts — **you need this to verify the event fires**.
+### 3. The Computer Vision Pipeline (`bg3_ocr.py`)
+BG3SE does not currently expose reliable read access to the game's live UI data (the UI is built on NoesisGUI, a WPF-style framework, and BG3SE's binding to it does not support general traversal of arbitrary UI elements at this time). Rather than continuing to pursue that path, dialogue choice text is read directly from the screen via OCR:
+- Captures a configurable screen region (percentage-based, not hardcoded pixels) only while a dialogue is active.
+- Applies dual-threshold preprocessing so choice text is read correctly whether or not it's currently highlighted by mouse hover.
+- Dynamically locates the numbered choice list to extract the preceding subtitle line, rather than relying on fixed coordinates that break when the dialogue box resizes.
+- Detects and fills gaps in the numbered sequence when a choice list exceeds the visible screen area.
 
-4. Launch BG3 via Steam once to confirm SE loaded. You should see a separate console window titled **"Baldur's Gate 3 Script Extender"** appear.
+This approach has known, documented limitations: OCR occasionally introduces small artifacts on certain lines (e.g. a stray trailing character, or a truncated leading bracket on some choices). These have been observed in testing and are noted as an open item rather than papered over.
 
----
-
-## Step 2 — Install the BG3Bridge Mod
-
-### Option A — Manual (recommended for development)
-
-Copy the `mod/Mods/BG3Bridge/` folder into your BG3 local mods directory:
-
-```
-%LocalAppData%\Larian Studios\Baldur's Gate 3\Mods\BG3Bridge\
-```
-
-The full expected structure after copying:
-
-```
-%LocalAppData%\Larian Studios\Baldur's Gate 3\Mods\
-└── BG3Bridge\
-    ├── meta.lsx
-    └── ScriptExtender\
-        ├── Config.json
-        └── Lua\
-            ├── BootstrapServer.lua   ← event listener + file writer
-            └── BootstrapClient.lua   ← placeholder
-```
-
-### Option B — BG3 Mod Manager
-
-Pack the mod folder into a `.pak` using [BG3 Modders Multitool](https://github.com/ShinyHobo/BG3-Modders-Multitool), then load via [BG3 Mod Manager](https://github.com/LaughingLeader/BG3ModManager).
-
-> **For development, Option A (loose files) is much faster — no repacking needed.**
-
-### Enable the Mod in-game
-
-1. Open BG3.
-2. Go to **Main Menu → Mods**.
-3. Find **BG3Bridge** in the available mods list and enable it.
-4. Apply & restart if prompted.
-
-> **Alternatively**, add the mod UUID to your `modsettings.lsx` manually. The UUID is: `a7f3c812-5e2d-4b9a-8c1f-d6e04a2b7f93`
+### 4. The SDK Actuation Bridge (`bg3_neuro_bridge.py`)
+An asynchronous WebSocket client implementing the Neuro Game SDK protocol:
+- Sends the `startup` command on connect.
+- Translates the OCR'd subtitle and choice list into a `context` command.
+- Dynamically registers one action per currently visible choice (`choose_option_1`, `choose_option_2`, etc.) via `actions/register`, and unregisters the previous set before registering a new one whenever the dialogue state changes — preventing stale actions from a previous conversation from remaining selectable.
+- Uses `actions/force` to prompt a decision when the game is paused on a dialogue choice.
+- On receiving an `action` command, maps it back to the corresponding numbered choice and fires a keystroke via `PyDirectInput`/`SendInput`, then reports the outcome via `action/result`.
 
 ---
 
-## Step 3 — Verify the Output File Path
+## 🧗 Technical Challenges & Solutions
 
-The Lua mod calls:
-```lua
-Ext.IO.SaveFile("neuro_state.json", json_str)
-```
+Full history in `dev_logs/`. The two hardest problems, and what actually solved them:
 
-BG3SE resolves this relative path to:
-```
-%LocalAppData%\Larian Studios\Baldur's Gate 3\Script Extender\neuro_state.json
-```
+### Deploying a Script Extender Mod Under Patch 7
+Patch 7 introduced a stricter in-game Mod Manager that validates loaded mods against `modsettings.lsx`, which created a real deployment obstacle specific to BG3SE-based mods:
 
-Typical full path:
-```
-C:\Users\<YourName>\AppData\Local\Larian Studios\Baldur's Gate 3\Script Extender\neuro_state.json
-```
+- Exporting through the official Larian Toolkit did not reliably preserve the mod's `ScriptExtender/` folder — the Toolkit's own export pipeline isn't built with third-party tools like BG3SE in mind.
+- An intermediate approach (Toolkit export, inject Lua via `divine.exe`, manually patch the resulting file's hash in `modsettings.lsx`) was tried and failed: the hand-edited hash triggered Patch 7's file-integrity check, and the mod was silently disabled.
+- A symlink-based hash-spoofing workaround was considered and explicitly rejected — incompatible with shipping something clean and stream-safe.
+- **The actual root cause**, found after a full clean-slate rebuild: a UTF-8 byte-order-mark (BOM) in the mod's `Config.json` and `BootstrapServer.lua`, silently breaking both BG3SE's JSON parser and its Lua parser. Re-saving these files as UTF-8 without BOM resolved it completely — the mod then loaded reliably via the Toolkit's standard loose-file dev deployment path (`Data\Mods\<ModName>`), with no hash editing or workarounds needed at all.
+- Verified stable across repeated relaunches and toggling the mod via the in-game Mods menu.
 
----
+BG3 Mod Manager (BG3MM) was investigated as a documented alternative packaging tool for BG3SE mods, but the encoding fix above — not a switch to BG3MM — is what actually resolved deployment in this project.
 
-## Step 4 — Run the Python Watcher
+### Focus-Aware Keystroke Delivery
+Simulated keystrokes only register with the game while its window holds OS foreground focus. This produced real, observed failures during testing — for example, a Randy-driven run correctly returned `"Game lost focus; keystroke timed out."` via `action/result` rather than silently reporting success.
 
-Open a terminal (PowerShell or CMD) in the project folder:
+- The bridge checks foreground focus before firing a keystroke. If BG3 doesn't have focus, the action is deferred and polled for up to a bounded timeout, rather than fired blindly or forced via `SetForegroundWindow` (unreliable due to Windows' focus-steal prevention, and disruptive on a live stream regardless).
+- If the dialogue state changes while an action is deferred, it's cancelled rather than fired late into a context it no longer applies to.
+- This does not guarantee unconditional success — an unfocused window will still correctly fail the action — but it fails safely and reports accurately, which is the property that matters for a stream-facing tool.
 
-```powershell
-# Recommended: install watchfiles for near-instant detection
-pip install watchfiles
-
-# Run the watcher (auto-detects path)
-python neuro_watcher.py
-
-# Or with an explicit path:
-python neuro_watcher.py --path "C:\Users\<YourName>\AppData\Local\Larian Studios\Baldur's Gate 3\Script Extender\neuro_state.json"
-
-# Force polling mode (fallback):
-python neuro_watcher.py --no-watchfiles --interval 0.25
-```
-
-Expected output while waiting:
-```
-────────────────────────────────────────────────────────────────────────
-  BG3Bridge Watcher  —  MVP v0.1
-────────────────────────────────────────────────────────────────────────
-  Watching : C:\Users\...\neuro_state.json
-  Started  : 2026-07-31 00:15:00
-  Python   : 3.12.0
-
-Trigger a dialogue in BG3 to test. Press Ctrl+C to stop.
-```
+### Stale Context in the Neuro SDK
+Persistent, hardcoded actions led to the AI occasionally being offered choices no longer on screen.
+- **Solution:** `actions/unregister` is issued the moment the game state changes, before the new OCR'd choices are pushed as fresh, dynamic, parameter-less actions.
+- `actions/force` is used to prompt a decision whenever a dialogue pauses the game, since Neuro's SDK does not proactively act without being prompted.
 
 ---
 
-## Step 5 — Trigger the Event In-Game
+## ✅ Verified Result
 
-1. Load (or start) any **single-player campaign save**.
-2. Walk up to **any NPC** (a guard, merchant, or story NPC).
-3. Click on them to **initiate dialogue**.
-4. As soon as the dialogue screen opens:
-   - The BG3SE console should print:
-     ```
-     [BG3Bridge] DialogStarted fired!
-     [BG3Bridge]   dialog      = <DialogResourceName>
-     [BG3Bridge]   instanceID  = <number>
-     [BG3Bridge]   actors      = (none yet — see actors_note)
-     [BG3Bridge]   timestamp_ms= <ms>
-     [BG3Bridge] Wrote payload to: neuro_state.json
-     ```
-   - The Python watcher should print:
-     ```
-     ────────────────────────────────────────────────────────────────────────
-       [00:15:42.831]  BG3 EVENT RECEIVED
-     ────────────────────────────────────────────────────────────────────────
-       event      : DialogStarted
-       dialog     : <DialogResourceName>
-       instanceID : <number>
-       actors     : (none at start — see actors_note)
-       game_ms    : 183421 ms (monotonic)
-       bridge_ts  : 00:15:42.831
-     ```
+A full loop has been demonstrated end-to-end against the SDK reference test client (Randy): a real in-game dialogue was read via OCR, its choices registered as SDK actions, a decision received, the corresponding keystroke fired, and success confirmed via `action/result` — with a separate, correctly-reported focus failure observed in an earlier run, confirming the error path works as designed, not just the happy path.
 
 ---
 
-## Known Behaviors & Gotchas
+## 🚀 Execution & Setup
 
-### Actor list dynamically populates
-The `dialog_actors` field will typically be empty at `DialogStarted` because actors join the dialogue instance slightly later via `DialogActorJoined`. The bridge successfully captures these additions and updates the persistent state object as they join, translating internal IDs to their English localized names (e.g., "Kagha", "Shadowheart").
-
-### Combat Logs filtered
-The engine considers many items (torches, chests) to enter combat. The bridge strictly filters `EnteredCombat` and `LeftCombat` events to only trigger for Character entities (`Osi.IsCharacter`), preventing log spam from inanimate objects.
-
-### SE console is not appearing
-Confirm `ScriptExtenderSettings.json` has `"CreateConsole": true` in the `bin\` folder (not the Mods folder).
-
-### Mod not being loaded by SE
-- Make sure the `Mods\BG3Bridge\` folder is in `%LocalAppData%\Larian Studios\Baldur's Gate 3\Mods\` not in the Steam game folder.
-- Enable the mod from the in-game Mods menu.
-- Check the SE console for errors at startup — it will print `[BG3Bridge] Loaded. Listening for DialogStarted events.` if everything is wired up correctly.
-
-### `Ext.Json.Stringify` options
-The `{ Beautify = true }` option may not be available in all SE versions. If you see an error in the console about `Stringify`, replace:
-```lua
-Ext.Json.Stringify(payload, { Beautify = true })
-```
-with:
-```lua
-Ext.Json.Stringify(payload)
-```
-
-### File path on non-English Windows installations
-The `%LocalAppData%` path may differ. You can find the exact Script Extender output directory by running this in the BG3SE Lua console:
-```lua
-Ext.IO.SaveFile("test.json", "{}")
-```
-Then search for `test.json` in your AppData folder.
-
----
-
-## Project File Layout
-
-```
-BG3 project/
-├── mod/
-│   └── Mods/
-│       └── BG3Bridge/
-│           ├── meta.lsx                      ← BG3 mod metadata
-│           └── ScriptExtender/
-│               ├── Config.json               ← SE feature flags (Lua enabled)
-│               └── Lua/
-│                   ├── BootstrapServer.lua   ← Event listener + JSON writer
-│                   └── BootstrapClient.lua   ← Placeholder (required)
-├── neuro_watcher.py                         ← Python file watcher
-└── README.md                                 ← This file
-```
-
----
-
-## Success Criteria Checklist
-
-- [x] SE console prints `[BG3Bridge] Loaded.` on game start.
-- [x] Starting any dialogue prints `[BG3Bridge] DialogStarted fired!` in the SE console.
-- [x] `neuro_state.json` is created/updated in the Script Extender directory.
-- [x] Python watcher detects the change within ~1 second, scrubs the data, and prints it.
-- [x] `neuro_raw_events.jsonl` successfully records a rolling history of scrubbed events.
-
----
-
-## Next Steps (out of scope for this MVP)
-
-- WebSocket relay from the Python watcher to Neuro service.
-- Additional events: `Died`, `LeveledUp`, `AreaEntered`, etc.
-- Error handling / retry if `neuro_state.json` is locked (partially implemented in watcher).
+1. **Neuro SDK** — start the official SDK WebSocket server, or `mock_randy.py` for automated loop testing.
+2. **Neuro Bridge** — `python bg3_neuro_bridge.py`
+3. **BG3 Supervisor** — `python bg3_supervisor.py`
+4. **OCR Engine** — `python bg3_ocr.py`
+5. **Baldur's Gate 3** — launch normally with the mod placed in `Data\Mods\<ModName>` per the Toolkit's loose-file dev deployment method. Borderless Windowed mode recommended for reliable focus detection.

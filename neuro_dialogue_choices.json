@@ -2,8 +2,8 @@
   "event": "DialogueChoicesRead",
   "source": "ocr",
   "status": "processed",
-  "timestamp_ms": 1785619977679,
-  "subtitle": "Wyll: Well met.",
+  "timestamp_ms": 1785628792762,
+  "subtitle": "Wyll: Bloodthirst is another matter. But perhaps not too big of one, if it's a devil or demon's flesh you're wanting to tear.",
   "choices": [
     {
       "number": 1,
@@ -19,7 +19,7 @@
     },
     {
       "number": 4,
-      "text": "Idon't suppose you've come across an expert healer in your travels."
+      "text": "[don't suppose you've come across an expert healer in your travels."
     },
     {
       "number": 5,
@@ -27,15 +27,11 @@
     },
     {
       "number": 6,
-      "text": "I've got this... bloodthirst. An urge to destroy, maim, kill."
+      "text": "Go to camp and wait for me there."
     },
     {
       "number": 7,
-      "text": "Goto camp and wait for me there"
-    },
-    {
-      "number": 8,
-      "text": "Leave."
+      "text": "Leave. ."
     }
   ]
 }
